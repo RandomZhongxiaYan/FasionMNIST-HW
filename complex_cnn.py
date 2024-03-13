@@ -8,8 +8,7 @@ from torch.utils.data import DataLoader
 
 # Data loader
 transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.5,), (0.5,))
+    transforms.ToTensor())
 ])
 
 train_dataset = datasets.FashionMNIST(root='./data', train=True, download=True, transform=transform)
@@ -18,71 +17,37 @@ test_dataset = datasets.FashionMNIST(root='./data', train=False, download=True, 
 train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
 
-# ResNet like network
-class ResidualBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, stride=1, downsample=None):
-        super(ResidualBlock, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.downsample = downsample
-
-    def forward(self, x):
-        residual = x
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = self.conv2(out)
-        out = self.bn2(out)
-
-        if self.downsample:
-            residual = self.downsample(x)
-
-        out += residual
-        out = self.relu(out)
-        return out
-
-class ResNet(nn.Module):
+class ComplexNet(nn.Module):
     def __init__(self):
-        super(ResNet, self).__init__()
-        self.in_channels = 64
-        self.conv = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn = nn.BatchNorm2d(64)
-        self.relu = nn.ReLU(inplace=True)
-        self.layer1 = self.make_layer(64, 2, stride=1)
-        self.layer2 = self.make_layer(128, 2, stride=2)
-        self.layer3 = self.make_layer(256, 2, stride=2)
-        self.fc = nn.Linear(256, 10)
-
-    def make_layer(self, out_channels, blocks, stride):
-        downsample = None
-        if (stride != 1) or (self.in_channels != out_channels):
-            downsample = nn.Sequential(
-                nn.Conv2d(self.in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(out_channels))
-        layers = []
-        layers.append(ResidualBlock(self.in_channels, out_channels, stride, downsample))
-        self.in_channels = out_channels
-        for _ in range(1, blocks):
-            layers.append(ResidualBlock(out_channels, out_channels))
-        return nn.Sequential(*layers)
+        super(ComplexNet, self).__init__()
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm2d(128)
+        self.dropout = nn.Dropout(0.25)
+        self.fc1 = nn.Linear(128 * 7 * 7, 128)
+        self.fc_bn1 = nn.BatchNorm1d(128)
+        self.dropout1 = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(128, 10)
 
     def forward(self, x):
-        out = self.relu(self.bn(self.conv(x)))
-        out = self.layer1(out)
-        out = self.layer2(out)
-        out = self.layer3(out)
-        out = F.avg_pool2d(out, 4)
-        out = out.view(out.size(0), -1)
-        out = self.fc(out)
-        return F.log_softmax(out, dim=1)
+        x = F.leaky_relu(self.bn1(self.conv1(x)))
+        x = F.max_pool2d(x, 2)
+        x = F.leaky_relu(self.bn2(self.conv2(x)))
+        x = F.max_pool2d(x, 2)
+        x = F.leaky_relu(self.bn3(self.conv3(x)))
+        x = F.max_pool2d(x, 2)
+        x = x.view(-1, 128 * 7 * 7)
+        x = F.leaky_relu(self.fc_bn1(self.fc1(self.dropout(x))))
+        x = self.fc2(self.dropout1(x))
+        return F.log_softmax(x, dim=1)
 
 # Training
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model = ResNet().to(device)
+model = ComplexNet().to(device)
 optimizer = optim.Adam(model.parameters())
 
 def train(epoch):
